@@ -1,0 +1,14 @@
+[project]
+name = "view-old-route"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "dotenv>=0.9.9",
+    "pandas>=2.3.3",
+    "plotly>=6.5.2",
+    "pymssql>=2.3.11",
+    "sqlalchemy>=2.0.45",
+    "streamlit>=1.53.0",
+]
