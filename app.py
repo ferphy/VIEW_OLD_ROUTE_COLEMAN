@@ -9,12 +9,16 @@ import os
 from dotenv import load_dotenv
 
 # --- CONFIG LOADING ---
-load_dotenv()
-APP_TITLE = os.getenv("APP_TITLE", "Route Timeline Viewer")
-TECH_TIMELINE_QUERY = os.getenv("TECH_TIMELINE_QUERY")
+APP_TITLE = st.secrets.get("app", {}).get("TITLE", "Route Timeline Viewer")
+TECH_TIMELINE_QUERY = st.secrets.get("queries", {}).get("TECH_TIMELINE")
 
 if not TECH_TIMELINE_QUERY:
-    st.error("Missing TECH_TIMELINE_QUERY in .env")
+    # Fallback to env if running locally and secrets not found
+    load_dotenv()
+    TECH_TIMELINE_QUERY = os.getenv("TECH_TIMELINE_QUERY")
+
+if not TECH_TIMELINE_QUERY:
+    st.error("Missing TECH_TIMELINE_QUERY in st.secrets or .env")
     st.stop()
 
 # --- PAGE CONFIG ---

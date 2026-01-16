@@ -6,10 +6,20 @@ from db.session import db_session
 
 def main():
     load_dotenv()
-    test_query = os.getenv("TEST_QUERY")
+
+    # Try st.secrets first (unlikely but good for consistency)
+    try:
+        import streamlit as st
+
+        test_query = st.secrets.get("queries", {}).get("TEST")
+    except Exception:
+        test_query = None
 
     if not test_query:
-        print("Error: TEST_QUERY not found in .env")
+        test_query = os.getenv("TEST_QUERY")
+
+    if not test_query:
+        print("Error: TEST_QUERY not found in .env or st.secrets")
         return
 
     print("Testing database connection...")

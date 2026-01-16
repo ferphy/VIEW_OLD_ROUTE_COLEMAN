@@ -14,11 +14,19 @@ load_dotenv()
 class DatabaseUtils:
     @staticmethod
     def get_connection_string() -> str:
-        db_host = os.getenv("DB_SERVER")
-        db_port = os.getenv("DB_PORT", "1433")
-        db_name = os.getenv("DB_NAME")
-        db_user = os.getenv("DB_USERNAME")
-        db_password = os.getenv("DB_PASSWORD")
+        # Try Streamlit secrets first
+        try:
+            import streamlit as st
+
+            secrets = st.secrets.get("database", {})
+        except Exception:
+            secrets = {}
+
+        db_host = secrets.get("DB_SERVER") or os.getenv("DB_SERVER")
+        db_port = secrets.get("DB_PORT") or os.getenv("DB_PORT", "1433")
+        db_name = secrets.get("DB_NAME") or os.getenv("DB_NAME")
+        db_user = secrets.get("DB_USERNAME") or os.getenv("DB_USERNAME")
+        db_password = secrets.get("DB_PASSWORD") or os.getenv("DB_PASSWORD")
 
         missing = [
             name
@@ -32,6 +40,8 @@ class DatabaseUtils:
             if not value
         ]
         if missing:
-            raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
+            raise RuntimeError(
+                f"Missing configuration (env or st.secrets): {', '.join(missing)}"
+            )
 
         return f"mssql+pymssql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
