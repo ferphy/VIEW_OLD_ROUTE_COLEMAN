@@ -116,6 +116,8 @@ def calculate_efficiency_stats(
             "Service",
             row["SessionID"],
         )
+        # Store company info for classification
+        rows[-1]["CompanyName"] = row["CompanyName"]
 
     plot_df = pd.DataFrame(rows)
     if plot_df.empty:
@@ -181,24 +183,42 @@ def calculate_efficiency_stats(
         global_service_secs += tech_service_secs
         total_tech_days += 1
 
+        # Classification: Mobile (>1 unique CompanyName) vs Stationary (1)
+        unique_companies = tech_tasks.dropna(subset=["CompanyName"])[
+            "CompanyName"
+        ].nunique()
+        tech_type = "Mobile" if unique_companies > 1 else "Stationary"
+
         stats_data.append(
             {
                 "Technician": tech,
                 "Date": task_date,
+                "Type": tech_type,
                 "Idle Secs": tech_idle_secs,
                 "Travel Secs": tech_travel_secs,
                 "Service Secs": tech_service_secs,
             }
         )
 
-    # Aggregate by Technician (for the summary cards)
-    # Sum only numeric columns to avoid TypeError with Date column
-    agg_stats = (
-        pd.DataFrame(stats_data)
-        .groupby("Technician")[["Idle Secs", "Travel Secs", "Service Secs"]]
-        .sum()
-        .reset_index()
-    )
+    # Aggregate by Technician
+    df_temp = pd.DataFrame(stats_data)
+    if not df_temp.empty:
+        agg_stats = (
+            df_temp.groupby("Technician")
+            .agg(
+                {
+                    "Idle Secs": "sum",
+                    "Travel Secs": "sum",
+                    "Service Secs": "sum",
+                    "Type": lambda x: x.mode()[0] if not x.mode().empty else "Unknown",
+                }
+            )
+            .reset_index()
+        )
+    else:
+        agg_stats = pd.DataFrame(
+            columns=["Technician", "Idle Secs", "Travel Secs", "Service Secs", "Type"]
+        )
     agg_stats["Idle Mins"] = (agg_stats["Idle Secs"] / 60).astype(int)
     agg_stats["Travel Mins"] = (agg_stats["Travel Secs"] / 60).astype(int)
 
@@ -242,12 +262,34 @@ def calculate_efficiency_stats(
         else 0,
     }
 
+    # Tech Type Summary
+    type_summary = (
+        agg_stats.groupby("Type")
+        .agg(
+            {
+                "Technician": "count",
+                "Idle %": "mean",
+                "Travel %": "mean",
+                "Opt %": "mean",
+            }
+        )
+        .rename(columns={"Technician": "Count"})
+        .reset_index()
+    )
+
+    total_techs = type_summary["Count"].sum()
+    if total_techs > 0:
+        type_summary["Pct"] = round((type_summary["Count"] / total_techs) * 100, 1)
+    else:
+        type_summary["Pct"] = 0
+
     return (
         agg_stats,
         global_stats["idle_pct"],
         global_stats["travel_pct"],
         global_stats["service_pct"],
         plot_df,
+        type_summary,
     )
 
 
@@ -279,12 +321,14 @@ try:
         month_df = get_route_data(m_start, m_end)
 
     if not month_df.empty:
-        agg_month, g_idle_m, g_travel_m, g_service_m, _ = calculate_efficiency_stats(
-            month_df,
-            selected_date,
-            DAY_START_CALC,
-            DAY_END_CALC,
-            TOTAL_WORK_MINS_PER_DAY,
+        agg_month, g_idle_m, g_travel_m, g_service_m, _, month_type_summary = (
+            calculate_efficiency_stats(
+                month_df,
+                selected_date,
+                DAY_START_CALC,
+                DAY_END_CALC,
+                TOTAL_WORK_MINS_PER_DAY,
+            )
         )
 
         st.markdown(f"### Performance Summary - {selected_date.strftime('%B %Y')}")
@@ -323,6 +367,26 @@ try:
             """,
                 unsafe_allow_html=True,
             )
+
+        # Monthly Tech Type Comparison
+        st.markdown("#### Tech Profile Distribution (Month)")
+        t_cols = st.columns(len(month_type_summary))
+        for i, (_, row) in enumerate(month_type_summary.iterrows()):
+            with t_cols[i]:
+                color = "#00C9FF" if row["Type"] == "Mobile" else "#92FE9D"
+                st.markdown(
+                    f"""
+                    <div style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 10px; border-top: 3px solid {color};">
+                        <div style="color: #888; font-size: 0.8rem;">{row["Type"]} Technicians</div>
+                        <div style="display: flex; align-items: baseline; gap: 10px;">
+                            <div style="font-size: 1.5rem; font-weight: bold;">{int(row["Count"])}</div>
+                            <div style="font-size: 0.9rem; color: {color}; opacity: 0.8;">{row["Pct"]}%</div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: #666;">Avg Idle: {row["Idle %"]}%</div>
+                    </div>
+                """,
+                    unsafe_allow_html=True,
+                )
     else:
         st.warning("No monthly data available for this period.")
 
@@ -338,7 +402,7 @@ try:
         st.warning(f"No daily data for {selected_date.strftime('%Y-%m-%d')}")
     else:
         # Preprocessing for Daily
-        agg_day, g_idle_d, g_travel_d, g_service_d, plot_df = (
+        agg_day, g_idle_d, g_travel_d, g_service_d, plot_df, day_type_summary = (
             calculate_efficiency_stats(
                 daily_df,
                 selected_date,
@@ -366,6 +430,26 @@ try:
                 f'<div class="card" style="text-align: center; border-left: 5px solid #92FE9D;"><div style="color: #888; font-size: 0.9rem;">Productive Time</div><div style="font-size: 1.8rem; font-weight: bold; color: #92FE9D;">{g_service_d}%</div></div>',
                 unsafe_allow_html=True,
             )
+
+        # Daily Tech Type Comparison
+        st.markdown("#### Tech Profile Distribution (Day)")
+        td_cols = st.columns(len(day_type_summary))
+        for i, (_, row) in enumerate(day_type_summary.iterrows()):
+            with td_cols[i]:
+                color = "#00C9FF" if row["Type"] == "Mobile" else "#92FE9D"
+                st.markdown(
+                    f"""
+                    <div style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 10px; border-top: 3px solid {color};">
+                        <div style="color: #888; font-size: 0.8rem;">{row["Type"]} Technicians</div>
+                        <div style="display: flex; align-items: baseline; gap: 10px;">
+                            <div style="font-size: 1.5rem; font-weight: bold;">{int(row["Count"])}</div>
+                            <div style="font-size: 0.9rem; color: {color}; opacity: 0.8;">{row["Pct"]}%</div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: #666;">Avg Idle: {row["Idle %"]}%</div>
+                    </div>
+                """,
+                    unsafe_allow_html=True,
+                )
 
         # --- UI LAYOUT ---
         st.markdown("### Technician Detail")
